@@ -1,0 +1,305 @@
+/* ================================================
+   MIRROR Bot — Custom Styles
+   Optimized for Raspberry Pi 4 / 1920×1080 kiosk
+   ================================================ */
+
+/* ---- Reset & Base ---- */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: #000;
+  cursor: none; /* Hide cursor in kiosk mode */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Show cursor for dev/debug — remove for production */
+body.dev-mode {
+  cursor: default;
+}
+
+/* ---- Glassmorphism Panel ---- */
+.mirror-glass-panel {
+  background: rgba(8, 18, 35, 0.45);
+  border: 1px solid rgba(0, 210, 255, 0.1);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 0 20px rgba(0, 210, 255, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Glow variant */
+.mirror-glass-panel.glow {
+  border-color: rgba(0, 210, 255, 0.25);
+  box-shadow:
+    0 0 30px rgba(0, 210, 255, 0.08),
+    0 0 60px rgba(0, 210, 255, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* ---- Vignette Overlay ---- */
+#vignette-overlay {
+  background: radial-gradient(
+    ellipse at center,
+    transparent 40%,
+    rgba(0, 0, 0, 0.5) 100%
+  );
+}
+
+/* ---- AI Orb Animations ---- */
+.orb-ring {
+  animation: orb-pulse 4.5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes orb-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.6;
+  }
+}
+
+.orb-core-glow {
+  background: radial-gradient(
+    circle,
+    rgba(0, 210, 255, 0.35) 0%,
+    rgba(0, 210, 255, 0.1) 50%,
+    transparent 70%
+  );
+  box-shadow:
+    0 0 40px rgba(0, 210, 255, 0.2),
+    0 0 80px rgba(0, 210, 255, 0.08);
+  animation: core-breathe 3s ease-in-out infinite;
+  will-change: transform, box-shadow;
+}
+
+@keyframes core-breathe {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 40px rgba(0, 210, 255, 0.2),
+      0 0 80px rgba(0, 210, 255, 0.08);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow:
+      0 0 60px rgba(0, 210, 255, 0.3),
+      0 0 100px rgba(0, 210, 255, 0.12);
+  }
+}
+
+/* Active state orb — more intense glow */
+.orb-active .orb-core-glow {
+  background: radial-gradient(
+    circle,
+    rgba(0, 210, 255, 0.6) 0%,
+    rgba(0, 210, 255, 0.2) 50%,
+    transparent 70%
+  );
+  animation: core-breathe-active 1.5s ease-in-out infinite;
+}
+
+@keyframes core-breathe-active {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 50px rgba(0, 210, 255, 0.35),
+      0 0 100px rgba(0, 210, 255, 0.15);
+  }
+  50% {
+    transform: scale(1.15);
+    box-shadow:
+      0 0 70px rgba(0, 210, 255, 0.5),
+      0 0 120px rgba(0, 210, 255, 0.2);
+  }
+}
+
+.orb-active .orb-ring {
+  animation: orb-pulse-active 2s ease-in-out infinite;
+  border-color: rgba(0, 210, 255, 0.3);
+}
+
+@keyframes orb-pulse-active {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+}
+
+/* ---- Status Indicator Pulse ---- */
+.status-pulse {
+  animation: status-blink 2.5s ease-in-out infinite;
+  will-change: opacity;
+}
+
+@keyframes status-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ---- Touch Hint Ring ---- */
+.touch-ring-container {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.touch-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 210, 255, 0.15);
+  animation: touch-ring-expand 3s ease-out infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes touch-ring-expand {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+/* ---- Conversation Messages ---- */
+.chat-message {
+  animation: msg-fade-in 0.4s ease-out forwards;
+  opacity: 0;
+}
+
+@keyframes msg-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chat-user {
+  border-left: 2px solid rgba(0, 210, 255, 0.4);
+  padding-left: 12px;
+}
+
+.chat-ai {
+  border-left: 2px solid rgba(0, 210, 255, 0.15);
+  padding-left: 12px;
+}
+
+.chat-user .chat-label {
+  color: rgba(0, 210, 255, 0.8);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.chat-ai .chat-label {
+  color: rgba(0, 210, 255, 0.5);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.chat-text {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 300;
+  line-height: 1.6;
+  color: rgba(200, 225, 255, 0.85);
+}
+
+.chat-ai .chat-text {
+  color: rgba(200, 225, 255, 0.7);
+}
+
+/* ---- Typing Indicator ---- */
+.typing-indicator {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(0, 210, 255, 0.5);
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+/* ---- Scrollbar (thin, subtle) ---- */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(0, 210, 255, 0.15);
+  border-radius: 4px;
+}
+
+/* ---- Mic Active Glow ---- */
+.mic-glow {
+  filter: drop-shadow(0 0 8px rgba(0, 210, 255, 0.6));
+}
+
+/* ---- Utility: hardware accelerated ---- */
+.gpu-layer {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* ---- Reduce motion preference ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

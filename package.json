@@ -1,0 +1,10 @@
+{
+  "name": "mirror-bot",
+  "version": "1.0.0",
+  "description": "MIRROR Bot — Futuristic AI Smart Mirror",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  }
+}

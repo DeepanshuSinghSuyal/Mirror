@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0" />
+  <meta name="description" content="MIRROR Bot — Futuristic AI Smart Mirror Interface for Raspberry Pi 4" />
+  <title>MIRROR Bot — AI Smart Mirror</title>
+
+  <!-- Tailwind CSS (lightweight CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            mirror: {
+              black: '#000000',
+              dark: '#050a12',
+              panel: 'rgba(8, 18, 35, 0.45)',
+              border: 'rgba(0, 210, 255, 0.12)',
+              cyan: '#00d2ff',
+              blue: '#0a84ff',
+              glow: '#00e5ff',
+              muted: 'rgba(180, 220, 255, 0.5)',
+              dim: 'rgba(120, 170, 220, 0.3)',
+            }
+          },
+          fontFamily: {
+            display: ['"Orbitron"', 'sans-serif'],
+            body: ['"Inter"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <!-- GSAP Animation Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="bg-mirror-black text-white font-body overflow-hidden select-none" id="mirror-body">
+
+  <!-- ============================================== -->
+  <!-- BOOT SEQUENCE SCREEN                           -->
+  <!-- ============================================== -->
+  <div id="boot-screen" class="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center">
+    <div id="boot-logo" class="opacity-0 flex flex-col items-center gap-4">
+      <div class="text-5xl font-display font-bold tracking-[0.35em] text-mirror-cyan">MIRROR</div>
+      <div class="text-sm font-display tracking-[0.6em] text-mirror-muted">B O T</div>
+    </div>
+    <div id="boot-bar-container" class="mt-12 w-72 h-[2px] bg-mirror-panel rounded-full overflow-hidden opacity-0">
+      <div id="boot-bar" class="h-full w-0 bg-gradient-to-r from-mirror-cyan to-mirror-blue rounded-full"></div>
+    </div>
+    <div id="boot-status" class="mt-6 text-xs font-mono text-mirror-dim tracking-widest opacity-0">
+      INITIALIZING SYSTEMS...
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- PARTICLE CANVAS (subtle ambient particles)     -->
+  <!-- ============================================== -->
+  <canvas id="particle-canvas" class="fixed inset-0 z-0 pointer-events-none"></canvas>
+
+  <!-- ============================================== -->
+  <!-- MAIN MIRROR INTERFACE                          -->
+  <!-- ============================================== -->
+  <div id="mirror-ui" class="fixed inset-0 z-10 opacity-0">
+
+    <!-- Ambient Vignette Overlay -->
+    <div class="absolute inset-0 pointer-events-none z-0" id="vignette-overlay"></div>
+
+    <!-- =========================================== -->
+    <!-- TOP BAR                                     -->
+    <!-- =========================================== -->
+    <header class="absolute top-0 left-0 right-0 z-20 flex justify-between items-start p-8">
+
+      <!-- TOP LEFT: Clock & Date -->
+      <div id="clock-section" class="flex flex-col gap-1">
+        <div id="clock-time" class="text-6xl font-display font-bold tracking-wider text-white leading-none">
+          00:00
+        </div>
+        <div class="flex items-center gap-3 mt-1">
+          <span id="clock-seconds" class="text-lg font-display text-mirror-cyan tracking-widest">00</span>
+          <span id="clock-ampm" class="text-sm font-display text-mirror-muted tracking-widest"></span>
+        </div>
+        <div id="clock-date" class="text-sm font-body text-mirror-muted tracking-wide mt-2">
+          Monday, January 1, 2026
+        </div>
+      </div>
+
+      <!-- TOP RIGHT: Weather Widget -->
+      <div id="weather-widget" class="mirror-glass-panel px-6 py-4 min-w-[220px]">
+        <div class="flex items-center gap-4">
+          <div id="weather-icon" class="text-4xl">☀️</div>
+          <div class="flex flex-col">
+            <div class="flex items-baseline gap-1">
+              <span id="weather-temp" class="text-3xl font-display font-semibold text-white">--</span>
+              <span class="text-lg font-display text-mirror-muted">°C</span>
+            </div>
+            <span id="weather-condition" class="text-xs text-mirror-muted tracking-wide">Loading...</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 mt-3 text-xs text-mirror-dim">
+          <div class="flex items-center gap-1">
+            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2c0-3.32-2.67-7.25-8-11.8z"/></svg>
+            <span id="weather-humidity">--%</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+            <span id="weather-location">--</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- =========================================== -->
+    <!-- CENTER: AI ORB / WAVEFORM                   -->
+    <!-- =========================================== -->
+    <main class="absolute inset-0 flex items-center justify-center z-10">
+      <div id="ai-center" class="flex flex-col items-center gap-8">
+
+        <!-- AI Orb (Idle State) -->
+        <div id="ai-orb-container" class="relative w-48 h-48 flex items-center justify-center">
+          <!-- Outer ring pulses -->
+          <div id="orb-ring-1" class="absolute w-full h-full rounded-full border border-mirror-border orb-ring"></div>
+          <div id="orb-ring-2" class="absolute w-[85%] h-[85%] rounded-full border border-mirror-border orb-ring" style="animation-delay: -1.5s"></div>
+          <div id="orb-ring-3" class="absolute w-[70%] h-[70%] rounded-full border border-mirror-border orb-ring" style="animation-delay: -3s"></div>
+          <!-- Core glow -->
+          <div id="orb-core" class="w-16 h-16 rounded-full orb-core-glow"></div>
+        </div>
+
+        <!-- AI Status Text (Idle) -->
+        <div id="ai-idle-text" class="text-center">
+          <p class="text-sm font-display tracking-[0.3em] text-mirror-dim uppercase">Mirror Bot</p>
+        </div>
+
+        <!-- Voice Waveform (Active State — hidden by default) -->
+        <div id="waveform-container" class="hidden flex-col items-center gap-6">
+          <div id="ai-state-label" class="text-sm font-display tracking-[0.3em] text-mirror-cyan uppercase">
+            Listening...
+          </div>
+          <canvas id="waveform-canvas" width="400" height="80" class="opacity-80"></canvas>
+        </div>
+
+        <!-- AI Conversation Panel (Active State — hidden by default) -->
+        <div id="ai-conversation" class="hidden w-[600px] max-h-[340px] overflow-y-auto mirror-glass-panel p-6 flex flex-col gap-4 scrollbar-thin">
+          <!-- Messages will be injected here -->
+        </div>
+      </div>
+    </main>
+
+    <!-- =========================================== -->
+    <!-- BOTTOM BAR                                  -->
+    <!-- =========================================== -->
+    <footer class="absolute bottom-0 left-0 right-0 z-20 flex justify-between items-end p-8">
+
+      <!-- BOTTOM LEFT: System Status -->
+      <div id="system-status" class="flex flex-col gap-2">
+        <div class="flex items-center gap-2">
+          <span id="status-dot-net" class="w-2 h-2 rounded-full bg-emerald-400 status-pulse"></span>
+          <span class="text-xs text-mirror-dim font-mono">NETWORK</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="status-dot-mic" class="w-2 h-2 rounded-full bg-mirror-cyan status-pulse"></span>
+          <span class="text-xs text-mirror-dim font-mono">MICROPHONE</span>
+        </div>
+      </div>
+
+      <!-- BOTTOM CENTER: Activation Hint -->
+      <div id="touch-hint" class="flex flex-col items-center gap-2 mb-2">
+        <div class="touch-ring-container">
+          <div class="touch-ring"></div>
+          <svg class="w-5 h-5 text-mirror-cyan relative z-10" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-6m0 0V6m0 6h6m-6 0H6" />
+          </svg>
+        </div>
+        <span class="text-xs font-display tracking-[0.25em] text-mirror-dim uppercase">Touch to activate</span>
+      </div>
+
+      <!-- BOTTOM RIGHT: AI / System Status -->
+      <div id="ai-system-status" class="flex flex-col gap-2 items-end">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-mirror-dim font-mono">AI ENGINE</span>
+          <span id="status-dot-ai" class="w-2 h-2 rounded-full bg-mirror-cyan status-pulse"></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-mirror-dim font-mono">SYSTEM</span>
+          <span id="status-dot-sys" class="w-2 h-2 rounded-full bg-emerald-400 status-pulse"></span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- =========================================== -->
+    <!-- ACTIVE MODE OVERLAY (darkens background)    -->
+    <!-- =========================================== -->
+    <div id="active-overlay" class="fixed inset-0 bg-black/30 z-5 pointer-events-none opacity-0"></div>
+
+  </div>
+
+  <!-- ============================================== -->
+  <!-- SCRIPTS (modular)                              -->
+  <!-- ============================================== -->
+  <script src="js/clock.js"></script>
+  <script src="js/weather.js"></script>
+  <script src="js/particles.js"></script>
+  <script src="js/voice.js"></script>
+  <script src="js/animations.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
