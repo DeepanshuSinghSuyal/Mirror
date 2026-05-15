@@ -105,7 +105,25 @@ const MirrorVoice = (() => {
     }
   }
 
-  // --- Process user speech → AI text response (no TTS) ---
+  // --- Text-to-Speech ---
+  function speak(text, onDone) {
+    if (!window.speechSynthesis) { if (onDone) onDone(); return; }
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.rate = 0.95;
+    utter.pitch = 1.0;
+    utter.volume = 0.85;
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v =>
+      v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira')
+    );
+    if (preferred) utter.voice = preferred;
+    utter.onend = () => { if (onDone) onDone(); };
+    utter.onerror = () => { if (onDone) onDone(); };
+    window.speechSynthesis.speak(utter);
+  }
+
+  // --- Process user speech → AI response + speak it ---
   async function processUserSpeech(text) {
     stopWaveform();
     addMessage('user', text);
@@ -116,15 +134,18 @@ const MirrorVoice = (() => {
 
     removeTyping();
     addMessage('ai', aiResponse);
-    setStateLabel('Ready');
+    setStateLabel('Speaking...');
 
-    // Auto-listen again after a short pause
-    setTimeout(() => {
-      if (document.getElementById('waveform-container') &&
-          !document.getElementById('waveform-container').classList.contains('hidden')) {
-        startListening();
-      }
-    }, 2500);
+    // Speak the response, then auto-listen again
+    speak(aiResponse, () => {
+      setStateLabel('Ready');
+      setTimeout(() => {
+        if (document.getElementById('waveform-container') &&
+            !document.getElementById('waveform-container').classList.contains('hidden')) {
+          startListening();
+        }
+      }, 500);
+    });
   }
 
   /* --- Waveform Visualization --- */
@@ -232,10 +253,16 @@ const MirrorVoice = (() => {
     setStateLabel('Ready');
   }
 
+  // Preload voices (Chrome needs this)
+  if (window.speechSynthesis) {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  }
+
   return {
     startListening, stopListening, showAIResponse,
     addMessage, clearConversation, setStateLabel,
     startWaveform, stopWaveform, showTyping, removeTyping,
-    callAI
+    callAI, speak
   };
 })();

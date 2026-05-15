@@ -37,6 +37,7 @@ const MirrorApp = (() => {
     if (!isActive) return;
     isActive = false;
     MirrorVoice.stopListening();
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
     MirrorAnimations.deactivateTransition();
     clearTimeout(inactivityTimer);
     setTimeout(() => MirrorVoice.clearConversation(), 1500);
