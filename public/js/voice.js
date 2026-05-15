@@ -151,9 +151,48 @@ const MirrorVoice = (() => {
     window.speechSynthesis.speak(utter);
   }
 
+  // --- News Voice Commands ---
+  const NEWS_COMMANDS = [
+    { patterns: ['india news', 'indian news', 'show news', 'today news', "today's news"], action: () => MirrorNews.activate('general') },
+    { patterns: ['tech news', 'technology news'], action: () => MirrorNews.activate('technology') },
+    { patterns: ['ai news', 'science news'], action: () => MirrorNews.activate('science') },
+    { patterns: ['world news', 'global news', 'international news'], action: () => MirrorNews.activate('world') },
+    { patterns: ['business news', 'market news'], action: () => MirrorNews.activate('business') },
+    { patterns: ['next headline', 'next news', 'next story'], action: () => MirrorNews.nextArticle() },
+    { patterns: ['previous headline', 'previous news', 'go back'], action: () => MirrorNews.prevArticle() },
+    { patterns: ['stop news', 'close news', 'exit news', 'hide news'], action: () => MirrorNews.deactivate() },
+    { patterns: ['explain this', 'explain news', 'tell me more', 'what does this mean'], action: () => MirrorNews.explainCurrent() },
+  ];
+
+  function checkNewsCommand(text) {
+    const lower = text.toLowerCase();
+    for (const cmd of NEWS_COMMANDS) {
+      if (cmd.patterns.some(p => lower.includes(p))) {
+        cmd.action();
+        return true;
+      }
+    }
+    return false;
+  }
+
   // --- Process user speech → AI response + speak it ---
   async function processUserSpeech(text) {
     stopWaveform();
+
+    // Check for news commands first
+    if (typeof MirrorNews !== 'undefined' && checkNewsCommand(text)) {
+      addMessage('user', text);
+      setStateLabel('Ready');
+      // Re-listen after a pause
+      setTimeout(() => {
+        if (document.getElementById('waveform-container') &&
+            !document.getElementById('waveform-container').classList.contains('hidden')) {
+          startListening();
+        }
+      }, 2000);
+      return;
+    }
+
     addMessage('user', text);
     setStateLabel('Processing...');
     showTyping();

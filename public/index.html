@@ -209,12 +209,69 @@
   </div>
 
   <!-- ============================================== -->
+  <!-- NEWS MODE OVERLAY                              -->
+  <!-- ============================================== -->
+  <div id="news-overlay" class="hidden fixed inset-0 z-30 flex-col">
+
+    <!-- Cinematic background image (very dark, blurred) -->
+    <div id="news-bg-image" class="news-bg-layer"></div>
+
+    <!-- Dark vignette over background -->
+    <div class="absolute inset-0 z-[1]" style="background: radial-gradient(ellipse at center, rgba(0,0,0,0.3) 30%, rgba(0,0,0,0.85) 100%);"></div>
+
+    <!-- Progress bar (top edge) -->
+    <div class="absolute top-0 left-0 right-0 h-[2px] z-[5]">
+      <div id="news-progress" class="h-full bg-gradient-to-r from-transparent via-[#00d2ff] to-transparent origin-left" style="transform: scaleX(0);"></div>
+    </div>
+
+    <!-- Main content -->
+    <div class="relative z-[2] flex flex-1 items-center px-16 py-20 gap-16">
+
+      <!-- LEFT: Category + Headline + Summary -->
+      <div class="flex-1 flex flex-col justify-center max-w-[55%]">
+
+        <!-- Category pill -->
+        <div class="flex items-center gap-3 mb-6">
+          <span class="w-2 h-2 rounded-full bg-[#00d2ff] status-pulse"></span>
+          <span id="news-category" class="text-xs font-display tracking-[0.35em] text-[#00d2ff] uppercase">INDIA NEWS</span>
+        </div>
+
+        <!-- Headline -->
+        <h2 id="news-headline" class="text-3xl font-display font-semibold text-white leading-snug tracking-wide mb-5" style="text-shadow: 0 0 30px rgba(0,210,255,0.08);">
+          Loading headlines...
+        </h2>
+
+        <!-- Summary -->
+        <p id="news-summary" class="text-base font-body font-light text-[rgba(180,220,255,0.6)] leading-relaxed mb-6 line-clamp-3">
+        </p>
+
+        <!-- Source + time -->
+        <div class="flex items-center gap-3">
+          <span id="news-source" class="text-xs font-mono text-[rgba(120,170,220,0.4)] tracking-wide"></span>
+        </div>
+
+        <!-- Counter -->
+        <div id="news-counter" class="mt-8 text-xs font-mono text-[rgba(120,170,220,0.25)] tracking-widest">1 / 10</div>
+      </div>
+
+      <!-- RIGHT: News Image -->
+      <div class="flex-shrink-0 w-[380px]">
+        <div id="news-image-frame" class="news-image-frame" style="display:none;">
+          <img id="news-image" src="" alt="" class="w-full h-[260px] object-cover rounded-xl" />
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================== -->
   <!-- SCRIPTS (modular)                              -->
   <!-- ============================================== -->
   <script src="js/clock.js"></script>
   <script src="js/weather.js"></script>
   <script src="js/particles.js"></script>
   <script src="js/voice.js"></script>
+  <script src="js/news.js"></script>
   <script src="js/animations.js"></script>
   <script src="js/app.js"></script>
 </body>

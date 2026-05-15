@@ -327,6 +327,47 @@ body.dev-mode {
   will-change: transform;
 }
 
+/* ---- News Mode ---- */
+.news-bg-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  filter: blur(20px) brightness(0.25);
+  transform: scale(1.15); /* hide blur edges */
+  transition: opacity 1.2s ease;
+  will-change: opacity;
+}
+
+.news-image-frame {
+  background: rgba(8, 18, 35, 0.5);
+  border: 1px solid rgba(0, 210, 255, 0.1);
+  border-radius: 16px;
+  padding: 6px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 0 30px rgba(0, 210, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.news-image-frame img {
+  opacity: 0.55;
+  filter: brightness(0.6);
+  transition: opacity 0.5s ease;
+}
+
+/* Line clamp for summary */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* ---- Reduce motion preference ---- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

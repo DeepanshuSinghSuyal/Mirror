@@ -59,6 +59,33 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // API route: /api/news
+  if (req.method === 'GET' && req.url.startsWith('/api/news')) {
+    const urlObj = new URL(req.url, `http://localhost:${PORT}`);
+    const category = urlObj.searchParams.get('category') || 'general';
+    const apiKey = process.env.GNEWS_API_KEY;
+    if (!apiKey) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'GNEWS_API_KEY not set in .env' }));
+    }
+    try {
+      const gnewsUrl = `https://gnews.io/api/v4/top-headlines?category=${category}&lang=en&country=in&max=10&apikey=${apiKey}`;
+      const gnewsRes = await fetch(gnewsUrl);
+      const data = await gnewsRes.json();
+      const articles = (data.articles || []).map(a => ({
+        title: a.title || '', description: a.description || '',
+        image: a.image || '', source: a.source?.name || '',
+        url: a.url || '', publishedAt: a.publishedAt || ''
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ articles, category }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
   // Static files
   let filePath = req.url === '/' ? '/index.html' : req.url;
   filePath = path.join(PUBLIC, filePath);
