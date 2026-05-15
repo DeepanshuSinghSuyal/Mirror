@@ -59,17 +59,23 @@ const MirrorApp = (() => {
 
   /* --- Event Listeners --- */
   function bindEvents() {
+    // Single click anywhere → activate
     document.getElementById('mirror-body').addEventListener('click', (e) => {
-      // Don't toggle if clicking inside conversation panel
       if (e.target.closest('#ai-conversation')) return;
-      toggleMirror();
+      if (!isActive) activateMirror();
       resetInactivityTimer();
+    });
+
+    // Double click anywhere → deactivate
+    document.getElementById('mirror-body').addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      if (isActive) deactivateMirror();
     });
 
     document.addEventListener('keydown', (e) => {
       if (e.code === 'Space' || e.code === 'Enter') {
         e.preventDefault();
-        toggleMirror();
+        if (!isActive) activateMirror();
         resetInactivityTimer();
       }
       if (e.code === 'Escape' && isActive) deactivateMirror();

@@ -15,7 +15,7 @@ html, body {
   height: 100vh;
   overflow: hidden;
   background: #000;
-  cursor: none; /* Hide cursor in kiosk mode */
+  cursor: default;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
