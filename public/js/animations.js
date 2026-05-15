@@ -1,5 +1,6 @@
 /* ================================================
    MIRROR Bot — GSAP Animations Module
+   Fixed: fromTo() for reliable reactivation
    ================================================ */
 const MirrorAnimations = (() => {
 
@@ -42,18 +43,22 @@ const MirrorAnimations = (() => {
       .to('#touch-hint', { opacity:0, y:10, duration:0.3 }, '-=0.3')
     // Animate orb smaller & up
       .to('#ai-orb-container', { scale:0.6, y:-80, duration:0.8, ease:'power2.inOut' }, '-=0.2')
-    // Show waveform
+    // Show waveform — use .fromTo() so it always works on reactivation
       .call(() => {
-        document.getElementById('waveform-container').classList.remove('hidden');
-        document.getElementById('waveform-container').classList.add('flex');
+        const w = document.getElementById('waveform-container');
+        w.classList.remove('hidden');
+        w.classList.add('flex');
+        gsap.set(w, { opacity:0, y:15 }); // reset before animating
       })
-      .from('#waveform-container', { opacity:0, y:15, duration:0.5, ease:'power2.out' })
+      .to('#waveform-container', { opacity:1, y:0, duration:0.5, ease:'power2.out' })
     // Show conversation panel
       .call(() => {
-        document.getElementById('ai-conversation').classList.remove('hidden');
-        document.getElementById('ai-conversation').classList.add('flex');
+        const c = document.getElementById('ai-conversation');
+        c.classList.remove('hidden');
+        c.classList.add('flex');
+        gsap.set(c, { opacity:0, y:20 }); // reset before animating
       })
-      .from('#ai-conversation', { opacity:0, y:20, duration:0.5, ease:'power2.out' }, '-=0.2')
+      .to('#ai-conversation', { opacity:1, y:0, duration:0.5, ease:'power2.out' }, '-=0.2')
     // Orb glow active
       .call(() => { document.getElementById('ai-orb-container').classList.add('orb-active'); });
     return tl;
@@ -67,11 +72,13 @@ const MirrorAnimations = (() => {
       .call(() => {
         const c = document.getElementById('ai-conversation');
         c.classList.add('hidden'); c.classList.remove('flex');
+        gsap.set(c, { clearProps:'all' }); // clear inline styles
       })
       .to('#waveform-container', { opacity:0, y:15, duration:0.4, ease:'power2.in' }, '-=0.2')
       .call(() => {
         const w = document.getElementById('waveform-container');
         w.classList.add('hidden'); w.classList.remove('flex');
+        gsap.set(w, { clearProps:'all' }); // clear inline styles
       })
       .to('#ai-orb-container', { scale:1, y:0, duration:0.8, ease:'power2.inOut' })
       .to('#ai-idle-text', { opacity:1, y:0, duration:0.4 }, '-=0.3')

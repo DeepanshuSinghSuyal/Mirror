@@ -1,11 +1,12 @@
 /* ================================================
    MIRROR Bot — Main Application Controller
-   Orchestrates all modules
+   Fixed: chat persists, click debounce, reliable reactivation
    ================================================ */
 const MirrorApp = (() => {
   let isActive = false;
   let isBooted = false;
   let inactivityTimer = null;
+  let clickDebounce = null;
   const INACTIVITY_TIMEOUT = 60000; // 60s auto-deactivate
 
   /* --- Boot the mirror --- */
@@ -27,7 +28,6 @@ const MirrorApp = (() => {
     if (!isBooted || isActive) return;
     isActive = true;
     MirrorAnimations.activateTransition();
-    // Start real voice listening
     setTimeout(() => MirrorVoice.startListening(), 1200);
     resetInactivityTimer();
   }
@@ -40,13 +40,7 @@ const MirrorApp = (() => {
     if (window.speechSynthesis) window.speechSynthesis.cancel();
     MirrorAnimations.deactivateTransition();
     clearTimeout(inactivityTimer);
-    setTimeout(() => MirrorVoice.clearConversation(), 1500);
-  }
-
-  /* --- Toggle --- */
-  function toggleMirror() {
-    if (isActive) deactivateMirror();
-    else activateMirror();
+    // DON'T clear conversation — keep chat history visible on reactivation
   }
 
   /* --- Inactivity auto-deactivate --- */
@@ -59,16 +53,24 @@ const MirrorApp = (() => {
 
   /* --- Event Listeners --- */
   function bindEvents() {
-    // Single click anywhere → activate
+    // Single click → activate (with debounce to prevent double-click race)
     document.getElementById('mirror-body').addEventListener('click', (e) => {
       if (e.target.closest('#ai-conversation')) return;
-      if (!isActive) activateMirror();
-      resetInactivityTimer();
+
+      // Debounce: wait 250ms to check if it's a double-click
+      clearTimeout(clickDebounce);
+      clickDebounce = setTimeout(() => {
+        if (!isActive) {
+          activateMirror();
+        }
+        resetInactivityTimer();
+      }, 250);
     });
 
-    // Double click anywhere → deactivate
+    // Double click → deactivate (cancel the single-click debounce)
     document.getElementById('mirror-body').addEventListener('dblclick', (e) => {
       e.preventDefault();
+      clearTimeout(clickDebounce); // cancel the pending single-click activate
       if (isActive) deactivateMirror();
     });
 
@@ -97,5 +99,5 @@ const MirrorApp = (() => {
     init();
   }
 
-  return { activateMirror, deactivateMirror, toggleMirror, isActive: () => isActive };
+  return { activateMirror, deactivateMirror, isActive: () => isActive };
 })();
