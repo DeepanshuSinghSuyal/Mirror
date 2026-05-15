@@ -169,7 +169,14 @@ const MirrorVoice = (() => {
     if (!convPanel) return;
     const msg = document.createElement('div');
     msg.className = 'chat-message ' + (sender === 'user' ? 'chat-user' : 'chat-ai');
-    msg.innerHTML = `<div class="chat-label">${sender === 'user' ? 'You' : 'Mirror'}</div><div class="chat-text">${text}</div>`;
+    const label = document.createElement('div');
+    label.className = 'chat-label';
+    label.textContent = sender === 'user' ? 'You' : 'Mirror';
+    const body = document.createElement('div');
+    body.className = 'chat-text';
+    body.textContent = text;
+    msg.appendChild(label);
+    msg.appendChild(body);
     convPanel.appendChild(msg);
     convPanel.scrollTop = convPanel.scrollHeight;
   }

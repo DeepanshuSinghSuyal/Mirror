@@ -11,8 +11,8 @@
 }
 
 html, body {
-  width: 1920px;
-  height: 1080px;
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
   background: #000;
   cursor: none; /* Hide cursor in kiosk mode */
