@@ -105,19 +105,47 @@ const MirrorVoice = (() => {
     }
   }
 
-  // --- Text-to-Speech ---
+  // --- Text-to-Speech (natural voice selection) ---
+  // Ranked by quality — first match wins
+  const VOICE_PREFS = [
+    'Google UK English Female',    // Chrome — very natural
+    'Google US English',           // Chrome — smooth
+    'Microsoft Zira',              // Windows — pleasant female
+    'Microsoft Jenny',             // Windows 11 — very natural
+    'Samantha',                    // macOS — smooth female
+    'Karen',                       // macOS — Australian, warm
+    'Daniel',                      // macOS — British male
+    'Google UK English Male',      // Chrome — natural
+  ];
+
+  let cachedVoice = null;
+
+  function pickBestVoice() {
+    if (cachedVoice) return cachedVoice;
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices.length) return null;
+    // Try ranked preferences first
+    for (const pref of VOICE_PREFS) {
+      const match = voices.find(v => v.name === pref);
+      if (match) { cachedVoice = match; return match; }
+    }
+    // Fallback: any English female-sounding Google/Microsoft voice
+    const fallback = voices.find(v =>
+      v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Microsoft'))
+    ) || voices.find(v => v.lang.startsWith('en'));
+    cachedVoice = fallback || null;
+    return cachedVoice;
+  }
+
   function speak(text, onDone) {
     if (!window.speechSynthesis) { if (onDone) onDone(); return; }
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 0.95;
-    utter.pitch = 1.0;
-    utter.volume = 0.85;
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v =>
-      v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira')
-    );
-    if (preferred) utter.voice = preferred;
+    utter.rate = 0.92;    // slightly slower = more natural
+    utter.pitch = 1.05;   // slightly higher = warmer
+    utter.volume = 0.9;
+    const voice = pickBestVoice();
+    if (voice) utter.voice = voice;
     utter.onend = () => { if (onDone) onDone(); };
     utter.onerror = () => { if (onDone) onDone(); };
     window.speechSynthesis.speak(utter);
