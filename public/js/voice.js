@@ -164,8 +164,14 @@ const MirrorVoice = (() => {
     addMessage('ai', aiResponse);
     setStateLabel('Speaking...');
 
+    // Activate neon border glow
+    const glow = document.getElementById('border-glow');
+    if (glow) glow.classList.add('active');
+
     // Speak the response, then auto-listen again
     speak(aiResponse, () => {
+      // Deactivate glow
+      if (glow) glow.classList.remove('active');
       setStateLabel('Ready');
       setTimeout(() => {
         if (document.getElementById('waveform-container') &&
