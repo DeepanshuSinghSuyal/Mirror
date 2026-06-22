@@ -127,24 +127,29 @@ const MirrorVoice = (() => {
       } else if (voiceState === 'ACTIVE') {
         setStateLabel('\u201C' + raw + '\u201D');
         finalTranscript = raw;
+        // Process immediately when we get a FINAL result — don't wait for onend
+        if (final.trim() && !srQueryPending) {
+          srQueryPending = true;
+          processVoiceQuery(final.trim());
+        }
       }
     };
 
     r.onend = () => {
       isRecogActive = false;
       console.log(`[SR] Mic off. State:${voiceState}`);
-
+      // onend NEVER calls processVoiceQuery — that's done in onresult on final result.
+      // onend only handles restart logic.
       if (voiceState === 'PASSIVE') {
         srScheduleRestart();
       } else if (voiceState === 'ACTIVE') {
-        if (!srQueryPending && finalTranscript.trim()) {
-          srQueryPending = true;
-          processVoiceQuery(finalTranscript.trim());
-        } else if (!srQueryPending) {
-          srScheduleRestart(); // silence, retry
+        if (!srQueryPending) {
+          // No final result received (silence / no-speech) — retry
+          srScheduleRestart();
         }
+        // srQueryPending === true means processVoiceQuery already called → do nothing
       }
-      // PROCESSING / SPEAKING / IDLE → do nothing, let those states drive next action
+      // IDLE / PROCESSING / SPEAKING → do nothing
     };
 
     r.onerror = (event) => {
@@ -454,6 +459,10 @@ const MirrorVoice = (() => {
   ───────────────────────────────────────────── */
   function triggerWake(query) {
     playChime('success');
+    // Set IDLE before stopping so onend sees IDLE and does nothing.
+    // This prevents the wake word text (e.g. "hey mirror") from being
+    // passed to processVoiceQuery via onend.
+    voiceState = 'IDLE';
     _stopListening();
 
     if (query) {
