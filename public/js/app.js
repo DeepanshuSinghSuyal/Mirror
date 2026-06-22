@@ -1,12 +1,11 @@
 /* ================================================
    MIRROR Bot — Main Application Controller
-   Fixed: chat persists, click debounce, reliable reactivation
+   Wake Word Integration (Continuous Listening)
    ================================================ */
 const MirrorApp = (() => {
   let isActive = false;
   let isBooted = false;
   let inactivityTimer = null;
-  let clickDebounce = null;
   const INACTIVITY_TIMEOUT = 60000; // 60s auto-deactivate
 
   /* --- Boot the mirror --- */
@@ -20,6 +19,11 @@ const MirrorApp = (() => {
       MirrorClock.start();
       MirrorWeather.start();
       MirrorParticles.start();
+      
+      // Start passive voice monitoring (listening for "Mirror")
+      if (typeof MirrorVoice !== 'undefined') {
+        MirrorVoice.startPassiveListening();
+      }
     });
   }
 
@@ -28,7 +32,24 @@ const MirrorApp = (() => {
     if (!isBooted || isActive) return;
     isActive = true;
     MirrorAnimations.activateTransition();
-    setTimeout(() => MirrorVoice.startListening(), 1200);
+    setTimeout(() => {
+      if (typeof MirrorVoice !== 'undefined') {
+        MirrorVoice.startActiveListening();
+      }
+    }, 1200);
+    resetInactivityTimer();
+  }
+
+  /* --- Activate Mirror with Direct Query (Single Utterance) --- */
+  function activateWithQuery(query) {
+    if (!isBooted || isActive) return;
+    isActive = true;
+    MirrorAnimations.activateTransition();
+    setTimeout(() => {
+      if (typeof MirrorVoice !== 'undefined') {
+        MirrorVoice.processVoiceQuery(query);
+      }
+    }, 600);
     resetInactivityTimer();
   }
 
@@ -36,11 +57,11 @@ const MirrorApp = (() => {
   function deactivateMirror() {
     if (!isActive) return;
     isActive = false;
-    MirrorVoice.stopListening();
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    if (typeof MirrorVoice !== 'undefined') {
+      MirrorVoice.deactivate();
+    }
     MirrorAnimations.deactivateTransition();
     clearTimeout(inactivityTimer);
-    // DON'T clear conversation — keep chat history visible on reactivation
   }
 
   /* --- Inactivity auto-deactivate --- */
@@ -53,30 +74,24 @@ const MirrorApp = (() => {
 
   /* --- Event Listeners --- */
   function bindEvents() {
-    // Single click → activate (with debounce to prevent double-click race)
+    // Touch-to-activate removed per request. Click only resets inactivity if active.
     document.getElementById('mirror-body').addEventListener('click', (e) => {
       if (e.target.closest('#ai-conversation')) return;
-
-      // Debounce: wait 250ms to check if it's a double-click
-      clearTimeout(clickDebounce);
-      clickDebounce = setTimeout(() => {
-        if (!isActive) {
-          activateMirror();
-        }
+      if (isActive) {
         resetInactivityTimer();
-      }, 250);
+      }
     });
 
-    // Double click → deactivate (cancel the single-click debounce)
+    // Double click → deactivate (emergency manual override/debug)
     document.getElementById('mirror-body').addEventListener('dblclick', (e) => {
       e.preventDefault();
-      clearTimeout(clickDebounce); // cancel the pending single-click activate
       if (isActive) deactivateMirror();
     });
 
     document.addEventListener('keydown', (e) => {
       if (e.code === 'Space' || e.code === 'Enter') {
         e.preventDefault();
+        // Keyboard debug activation
         if (!isActive) activateMirror();
         resetInactivityTimer();
       }
@@ -90,7 +105,7 @@ const MirrorApp = (() => {
   function init() {
     bindEvents();
     boot();
-    console.log('[Mirror] MIRROR Bot initialized — Groq AI + Web Speech API');
+    console.log('[Mirror] MIRROR Bot initialized — Wake Word Listening Enabled');
   }
 
   if (document.readyState === 'loading') {
@@ -99,5 +114,11 @@ const MirrorApp = (() => {
     init();
   }
 
-  return { activateMirror, deactivateMirror, isActive: () => isActive };
+  return {
+    activateMirror,
+    activateWithQuery,
+    deactivateMirror,
+    resetInactivityTimer,
+    isActive: () => isActive
+  };
 })();

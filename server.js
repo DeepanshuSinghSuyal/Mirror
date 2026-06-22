@@ -31,6 +31,35 @@ const MIME = {
 };
 
 const server = http.createServer(async (req, res) => {
+  // API route: /api/transcribe (Groq Whisper STT)
+  if (req.method === 'POST' && req.url === '/api/transcribe') {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', async () => {
+      try {
+        const apiKey = process.env.GROQ_API_KEY;
+        if (!apiKey) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'GROQ_API_KEY not set in .env' }));
+        }
+        const rawBody = Buffer.concat(chunks);
+        const contentType = req.headers['content-type'] || '';
+        const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': contentType },
+          body: rawBody,
+        });
+        const data = await groqRes.json();
+        res.writeHead(groqRes.ok ? 200 : groqRes.status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(groqRes.ok ? { transcript: data.text || '' } : { error: data.error?.message || 'Groq STT error' }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   // API route: /api/chat
   if (req.method === 'POST' && req.url === '/api/chat') {
     let body = '';
