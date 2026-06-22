@@ -1,7 +1,8 @@
 /* ================================================
-   MIRROR Bot — Voice UI Module
+   MIRROR Bot — Voice UI Module v3
    STT: Hybrid — webkitSpeechRecognition (Chrome) OR
-        MediaRecorder + Groq Whisper (Pi Chromium)
+        MediaRecorder + Groq Whisper (Pi/Firefox/any)
+   Auto-fallback: if native SR fails → switches to Whisper
    VAD: Web Audio AnalyserNode for smart silence detection
    Wake Word: "Mirror" | States: IDLE/PASSIVE/ACTIVE/PROCESSING/SPEAKING
    ================================================ */
@@ -15,8 +16,32 @@ const MirrorVoice = (() => {
 
   let chatHistory = [];
 
-  // IDLE → PASSIVE → (wake word) → ACTIVE → PROCESSING → SPEAKING → PASSIVE
+  // State machine: IDLE → PASSIVE → ACTIVE → PROCESSING → SPEAKING → PASSIVE
   let voiceState = 'IDLE';
+
+  /* ─────────────────────────────────────────────
+     STRATEGY DETECTION
+     Tries native SR first. If it errors with service issues,
+     automatically falls back to MediaRecorder + Groq Whisper.
+  ───────────────────────────────────────────── */
+  // Start assuming native SR is available if API exists
+  let useNativeSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  let nativeSRFailed = false; // set true after confirmed failure
+
+  function switchToWhisperFallback() {
+    if (nativeSRFailed) return; // already switched
+    nativeSRFailed = true;
+    useNativeSR = false;
+    console.warn('[Voice] Native SR failed — switching permanently to Groq Whisper fallback.');
+    // Clean up any stale SR object
+    recognition = null;
+    isRecogActive = false;
+    // Resume current state using Whisper
+    if (voiceState === 'PASSIVE') startPassiveLoop();
+    else if (voiceState === 'ACTIVE') startActiveCapture();
+  }
+
+  console.log(`[Voice] Initial STT strategy: ${useNativeSR ? 'Native SpeechRecognition' : 'MediaRecorder + Groq Whisper'}`);
 
   /* ─────────────────────────────────────────────
      CHIMES
@@ -48,34 +73,41 @@ const MirrorVoice = (() => {
     } catch (e) { console.warn('[Voice] Chime failed:', e); }
   }
 
-  /* ─────────────────────────────────────────────
-     STRATEGY DETECTION
-     Prefer native SpeechRecognition (desktop Chrome).
-     Fall back to MediaRecorder + Groq Whisper (Pi Chromium).
-  ───────────────────────────────────────────── */
-  const USE_NATIVE_SR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-  console.log(`[Voice] STT strategy: ${USE_NATIVE_SR ? 'Native SpeechRecognition' : 'MediaRecorder + Groq Whisper'}`);
-
   /* ════════════════════════════════════════════
      STRATEGY 1 — Native SpeechRecognition
-     (Desktop Chrome / any browser that supports it)
+     Creates a FRESH recognition object every time to avoid
+     stale state bugs after multiple start/stop cycles.
   ════════════════════════════════════════════ */
-  let recognition      = null;
-  let isRecogActive    = false;
-  let finalTranscript  = '';
-  let restartTimeout   = null;
+  let recognition    = null;
+  let isRecogActive  = false;
+  let finalTranscript = '';
+  let restartTimeout = null;
+  let srQueryPending = false; // prevents double-fire of processVoiceQuery
 
-  function initNativeSR() {
+  function createFreshRecognition() {
+    // Always destroy old object — prevents trance state after multiple wake cycles
+    if (recognition) {
+      try { recognition.abort(); } catch (_) {}
+      recognition = null;
+    }
+    isRecogActive = false;
+    srQueryPending = false;
+
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SR();
-    recognition.continuous        = false;
-    recognition.interimResults    = true;
-    recognition.lang              = 'en-IN';
-    recognition.maxAlternatives   = 1;
+    if (!SR) return null;
 
-    recognition.onstart = () => { isRecogActive = true; console.log(`[SR] Mic on. State:${voiceState}`); };
+    const r = new SR();
+    r.continuous      = false;
+    r.interimResults  = true;
+    r.lang            = 'en-IN';
+    r.maxAlternatives = 1;
 
-    recognition.onresult = (event) => {
+    r.onstart = () => {
+      isRecogActive = true;
+      console.log(`[SR] Mic on. State:${voiceState}`);
+    };
+
+    r.onresult = (event) => {
       let interim = '', final = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const t = event.results[i][0].transcript;
@@ -98,75 +130,114 @@ const MirrorVoice = (() => {
       }
     };
 
-    recognition.onend = () => {
+    r.onend = () => {
       isRecogActive = false;
       console.log(`[SR] Mic off. State:${voiceState}`);
+
       if (voiceState === 'PASSIVE') {
-        srTriggerRestart();
+        srScheduleRestart();
       } else if (voiceState === 'ACTIVE') {
-        if (finalTranscript.trim()) processVoiceQuery(finalTranscript.trim());
-        else srTriggerRestart();
+        if (!srQueryPending && finalTranscript.trim()) {
+          srQueryPending = true;
+          processVoiceQuery(finalTranscript.trim());
+        } else if (!srQueryPending) {
+          srScheduleRestart(); // silence, retry
+        }
       }
+      // PROCESSING / SPEAKING / IDLE → do nothing, let those states drive next action
     };
 
-    recognition.onerror = (event) => {
+    r.onerror = (event) => {
       console.warn(`[SR] Error [${event.error}] State:${voiceState}`);
       isRecogActive = false;
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setStateLabel('Microphone access denied'); voiceState = 'IDLE'; return;
+
+      // These mean Google's STT backend is unavailable (Pi Chromium, some Linux builds)
+      if (event.error === 'service-not-allowed' || event.error === 'network') {
+        console.warn('[SR] Backend unavailable — switching to Groq Whisper.');
+        switchToWhisperFallback();
+        return;
       }
-      if (voiceState === 'PASSIVE') srTriggerRestart();
+
+      // Hard mic denial — stop everything
+      if (event.error === 'not-allowed') {
+        setStateLabel('Microphone access denied');
+        voiceState = 'IDLE';
+        return;
+      }
+
+      // Soft errors — retry
+      if (voiceState === 'PASSIVE') srScheduleRestart();
       else if (voiceState === 'ACTIVE') {
-        if (event.error === 'no-speech') srTriggerRestart();
-        else { playChime('cancel'); setStateLabel('Voice error: ' + event.error); if (typeof MirrorApp !== 'undefined') MirrorApp.deactivateMirror(); }
+        if (event.error === 'no-speech') {
+          srScheduleRestart();
+        } else {
+          playChime('cancel');
+          setStateLabel('Voice error: ' + event.error);
+          if (typeof MirrorApp !== 'undefined') MirrorApp.deactivateMirror();
+        }
       }
     };
+
+    return r;
   }
 
-  function srTriggerRestart() {
+  function srScheduleRestart() {
     if (restartTimeout) clearTimeout(restartTimeout);
     restartTimeout = setTimeout(() => {
-      if ((voiceState === 'PASSIVE' || voiceState === 'ACTIVE') && !isRecogActive) srStart();
+      if ((voiceState === 'PASSIVE' || voiceState === 'ACTIVE') && !isRecogActive && useNativeSR) {
+        srStart();
+      }
     }, 400);
   }
 
   function srStart() {
-    if (!recognition) initNativeSR();
-    if (isRecogActive) { try { recognition.stop(); } catch (_) {} return; }
+    if (!useNativeSR) return;
+
+    // Always create a fresh recognition object — fixes trance state bug
+    recognition = createFreshRecognition();
+    if (!recognition) { switchToWhisperFallback(); return; }
+
     try {
-      recognition.continuous    = voiceState === 'PASSIVE';
+      recognition.continuous   = voiceState === 'PASSIVE';
       recognition.interimResults = true;
-      if (voiceState === 'PASSIVE') { setStateLabel('Ready'); }
-      else { finalTranscript = ''; setStateLabel('Listening...'); startWaveform(); }
+      finalTranscript = '';
+      srQueryPending = false;
+
+      if (voiceState === 'PASSIVE') setStateLabel('Ready');
+      else { setStateLabel('Listening...'); startWaveform(); }
+
       recognition.start();
-    } catch (e) { console.warn('[SR] Start failed:', e); }
+    } catch (e) {
+      console.warn('[SR] Start failed:', e);
+      srScheduleRestart();
+    }
   }
 
   function srStop() {
     if (restartTimeout) clearTimeout(restartTimeout);
-    if (recognition && isRecogActive) { try { recognition.stop(); } catch (_) {} }
+    if (recognition) {
+      try { recognition.abort(); } catch (_) {}
+      recognition = null;
+    }
+    isRecogActive = false;
+    srQueryPending = false;
   }
 
   /* ════════════════════════════════════════════
      STRATEGY 2 — MediaRecorder + Groq Whisper
-     (Pi Chromium, Firefox, etc.)
+     (Pi Chromium, Firefox, or after native SR fails)
   ════════════════════════════════════════════ */
 
-  // --- Shared mic stream & Web Audio ---
-  let micStream      = null;
-  let audioCtx       = null;
-  let analyserNode   = null;
+  let micStream    = null;
+  let audioCtx     = null;
+  let analyserNode = null;
 
-  // VAD settings
-  const VAD_SILENCE_THRESHOLD = 8;    // 0-255 avg frequency amplitude
-  const VAD_SILENCE_MS        = 1200; // ms of silence before "done speaking"
-  const VAD_MAX_ACTIVE_MS     = 12000; // max active recording cap
+  const VAD_SILENCE_THRESHOLD = 8;
+  const VAD_SILENCE_MS        = 1200;
+  const VAD_MAX_ACTIVE_MS     = 12000;
 
-  // Passive chunked loop
   let passiveLooping  = false;
   let passiveMR       = null;
-
-  // Active recording
   let activeRecording = false;
   let activeMR        = null;
 
@@ -205,11 +276,8 @@ const MirrorVoice = (() => {
   }
 
   function isSpeaking() { return getVolume() > VAD_SILENCE_THRESHOLD; }
+  function chunkHasSpeech(blob) { return blob.size > 4000; }
 
-  // Check if a chunk had any meaningful speech
-  function chunkHasSpeech(blob) { return blob.size > 4000; } // ~4KB minimum for real audio
-
-  // Send audio blob to /api/transcribe
   async function transcribeAudio(blob) {
     try {
       const ext = blob.type.includes('ogg') ? 'ogg'
@@ -220,7 +288,6 @@ const MirrorVoice = (() => {
       form.append('model', 'whisper-large-v3-turbo');
       form.append('language', 'en');
       form.append('response_format', 'json');
-
       const res = await fetch('/api/transcribe', { method: 'POST', body: form });
       if (!res.ok) return '';
       const data = await res.json();
@@ -228,7 +295,7 @@ const MirrorVoice = (() => {
     } catch (e) { console.warn('[Whisper] Transcribe error:', e); return ''; }
   }
 
-  /* --- PASSIVE LOOP: record 3.5s chunks, look for wake word --- */
+  /* --- PASSIVE LOOP --- */
   function startPassiveLoop() {
     if (passiveLooping) return;
     passiveLooping = true;
@@ -245,11 +312,11 @@ const MirrorVoice = (() => {
     const chunks = [];
     let mr;
     try { mr = new MediaRecorder(stream); }
-    catch (e) { console.error('[Whisper] MediaRecorder init failed:', e); passiveLooping = false; return; }
+    catch (e) { console.error('[Whisper] MediaRecorder failed:', e); passiveLooping = false; return; }
 
     passiveMR = mr;
     mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-    mr.start(100); // collect in 100ms slices
+    mr.start(100);
 
     await new Promise(r => setTimeout(r, 3500));
 
@@ -263,8 +330,6 @@ const MirrorVoice = (() => {
     if (!passiveLooping || voiceState !== 'PASSIVE') return;
 
     const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
-
-    // Skip Groq call if chunk was pure silence (saves API quota)
     if (!chunkHasSpeech(blob)) {
       if (passiveLooping && voiceState === 'PASSIVE') runPassiveChunk();
       return;
@@ -295,7 +360,7 @@ const MirrorVoice = (() => {
     console.log('[Whisper] Passive loop stopped.');
   }
 
-  /* --- ACTIVE CAPTURE: smart VAD stop (no fixed timer) --- */
+  /* --- ACTIVE CAPTURE with VAD --- */
   async function startActiveCapture() {
     if (activeRecording) return;
     activeRecording = true;
@@ -308,77 +373,51 @@ const MirrorVoice = (() => {
     const chunks = [];
     let mr;
     try { mr = new MediaRecorder(stream); }
-    catch (e) { console.error('[Whisper] MediaRecorder init failed:', e); activeRecording = false; stopWaveform(); return; }
+    catch (e) { console.error('[Whisper] MediaRecorder failed:', e); activeRecording = false; stopWaveform(); return; }
 
     activeMR = mr;
     mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
     mr.start(100);
 
-    // VAD: stop when user stops speaking
     await new Promise(resolve => {
       let silenceStart = null;
       let speechDetected = false;
       const startTime = Date.now();
 
       const vadInterval = setInterval(() => {
-        // Hard max cap
-        if (Date.now() - startTime > VAD_MAX_ACTIVE_MS) {
-          clearInterval(vadInterval);
-          resolve();
-          return;
+        if (Date.now() - startTime > VAD_MAX_ACTIVE_MS || !activeRecording || voiceState !== 'ACTIVE') {
+          clearInterval(vadInterval); resolve(); return;
         }
-
-        // State changed externally
-        if (!activeRecording || voiceState !== 'ACTIVE') {
-          clearInterval(vadInterval);
-          resolve();
-          return;
-        }
-
         if (isSpeaking()) {
           speechDetected = true;
           silenceStart = null;
-          setStateLabel('Listening... 🎙️');
-        } else {
-          if (speechDetected) {
-            // Only count silence after speech has been detected
-            if (!silenceStart) silenceStart = Date.now();
-            const silenceDur = Date.now() - silenceStart;
-            const pct = Math.min(100, Math.round((silenceDur / VAD_SILENCE_MS) * 100));
-            setStateLabel(`Done? ${pct}%`);
-            if (silenceDur >= VAD_SILENCE_MS) {
-              clearInterval(vadInterval);
-              resolve();
-            }
-          }
+          setStateLabel('Listening... \uD83C\uDFA4');
+        } else if (speechDetected) {
+          if (!silenceStart) silenceStart = Date.now();
+          const pct = Math.min(100, Math.round(((Date.now() - silenceStart) / VAD_SILENCE_MS) * 100));
+          setStateLabel(`Done? ${pct}%`);
+          if (Date.now() - silenceStart >= VAD_SILENCE_MS) { clearInterval(vadInterval); resolve(); }
         }
       }, 100);
     });
 
     stopWaveform();
-    if (voiceState !== 'ACTIVE') {
-      try { mr.stop(); } catch (_) {}
-      activeRecording = false;
-      return;
-    }
+    if (voiceState !== 'ACTIVE') { try { mr.stop(); } catch (_) {} activeRecording = false; return; }
 
     await new Promise(resolve => { mr.onstop = resolve; try { mr.stop(); } catch (_) { resolve(); } });
     activeRecording = false;
-
     if (voiceState !== 'ACTIVE') return;
 
     const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
     setStateLabel('Recognising...');
-
     const transcript = await transcribeAudio(blob);
     console.log('[Whisper][Active] Transcript:', transcript);
 
     if (voiceState !== 'ACTIVE') return;
 
-    if (transcript && transcript.length > 1) {
-      processVoiceQuery(transcript);
-    } else {
-      console.log('[Whisper] No speech in active window, back to passive.');
+    if (transcript && transcript.length > 1) processVoiceQuery(transcript);
+    else {
+      console.log('[Whisper] No speech detected, back to passive.');
       voiceState = 'PASSIVE';
       setStateLabel('Ready');
       startPassiveLoop();
@@ -392,10 +431,10 @@ const MirrorVoice = (() => {
   }
 
   /* ════════════════════════════════════════════
-     UNIFIED CONTROL — routes to correct strategy
+     UNIFIED CONTROL
   ════════════════════════════════════════════ */
   function _startListening() {
-    if (USE_NATIVE_SR) srStart();
+    if (useNativeSR) srStart();
     else {
       if (voiceState === 'PASSIVE') startPassiveLoop();
       else if (voiceState === 'ACTIVE') startActiveCapture();
@@ -403,8 +442,10 @@ const MirrorVoice = (() => {
   }
 
   function _stopListening() {
-    if (USE_NATIVE_SR) srStop();
-    else { stopPassiveLoop(); stopActiveCapture(); }
+    if (restartTimeout) clearTimeout(restartTimeout);
+    srStop();
+    stopPassiveLoop();
+    stopActiveCapture();
     stopWaveform();
   }
 
@@ -425,7 +466,7 @@ const MirrorVoice = (() => {
   }
 
   /* ─────────────────────────────────────────────
-     GROQ LLM CALL
+     GROQ LLM
   ───────────────────────────────────────────── */
   async function callAI(userMessage) {
     const now = new Date();
@@ -442,8 +483,7 @@ const MirrorVoice = (() => {
 
     try {
       const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages })
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
@@ -458,7 +498,7 @@ const MirrorVoice = (() => {
   }
 
   /* ─────────────────────────────────────────────
-     TEXT-TO-SPEECH
+     TTS
   ───────────────────────────────────────────── */
   const VOICE_PREFS = [
     'Google UK English Female', 'Google US English',
@@ -493,7 +533,7 @@ const MirrorVoice = (() => {
   }
 
   /* ─────────────────────────────────────────────
-     NEWS VOICE COMMANDS
+     NEWS COMMANDS
   ───────────────────────────────────────────── */
   const NEWS_COMMANDS = [
     { patterns: ['india news', 'indian news', 'show news', 'today news', "today's news"], action: () => MirrorNews.activate('general') },
@@ -501,8 +541,8 @@ const MirrorVoice = (() => {
     { patterns: ['ai news', 'science news'],      action: () => MirrorNews.activate('science') },
     { patterns: ['world news', 'global news', 'international news'], action: () => MirrorNews.activate('world') },
     { patterns: ['business news', 'market news'], action: () => MirrorNews.activate('business') },
-    { patterns: ['next headline', 'next news', 'next story'],       action: () => MirrorNews.nextArticle() },
-    { patterns: ['previous headline', 'previous news', 'go back'],  action: () => MirrorNews.prevArticle() },
+    { patterns: ['next headline', 'next news', 'next story'],        action: () => MirrorNews.nextArticle() },
+    { patterns: ['previous headline', 'previous news', 'go back'],   action: () => MirrorNews.prevArticle() },
     { patterns: ['stop news', 'close news', 'exit news', 'hide news'], action: () => MirrorNews.deactivate() },
     { patterns: ['explain this', 'explain news', 'tell me more', 'what does this mean'], action: () => MirrorNews.explainCurrent() },
   ];
@@ -516,16 +556,27 @@ const MirrorVoice = (() => {
   }
 
   /* ─────────────────────────────────────────────
-     PROCESS VOICE QUERY
+     PROCESS VOICE QUERY — central handler
   ───────────────────────────────────────────── */
   async function processVoiceQuery(query) {
+    // Guard: only process if we were in a valid pre-processing state
+    if (voiceState === 'PROCESSING' || voiceState === 'SPEAKING') {
+      console.warn(`[Voice] processVoiceQuery called in unexpected state: ${voiceState}. Ignoring.`);
+      return;
+    }
+
     voiceState = 'PROCESSING';
     _stopListening();
 
     const lower = query.toLowerCase().trim();
-    if (lower.includes('bye mirror') || lower.includes('goodbye mirror')) {
+
+    if (lower.includes('bye mirror') || lower.includes('goodbye mirror') || lower.includes('bye bye mirror')) {
+      console.log('[Voice] Goodbye command triggered');
       playChime('cancel');
-      if (typeof MirrorApp !== 'undefined') MirrorApp.deactivateMirror();
+      // Small delay so chime plays before deactivating
+      setTimeout(() => {
+        if (typeof MirrorApp !== 'undefined') MirrorApp.deactivateMirror();
+      }, 400);
       return;
     }
 
@@ -569,7 +620,7 @@ const MirrorVoice = (() => {
   }
 
   /* ─────────────────────────────────────────────
-     WAVEFORM VISUALIZATION
+     WAVEFORM
   ───────────────────────────────────────────── */
   let waveAnimId = null, wavePhase = 0, waveIntensity = 0.5;
 
@@ -603,11 +654,11 @@ const MirrorVoice = (() => {
   ───────────────────────────────────────────── */
   function addMessage(sender, text) {
     if (!convPanel) return;
-    const msg   = document.createElement('div');
+    const msg = document.createElement('div');
     msg.className = 'chat-message ' + (sender === 'user' ? 'chat-user' : 'chat-ai');
     const label = document.createElement('div'); label.className = 'chat-label';
     label.textContent = sender === 'user' ? 'You' : 'Mirror';
-    const body  = document.createElement('div'); body.className = 'chat-text';
+    const body = document.createElement('div'); body.className = 'chat-text';
     body.textContent = text;
     msg.appendChild(label); msg.appendChild(body);
     convPanel.appendChild(msg);
@@ -628,7 +679,7 @@ const MirrorVoice = (() => {
   function setStateLabel(text) { if (stateLabel) stateLabel.textContent = text; }
 
   /* ─────────────────────────────────────────────
-     EXTERNAL CONTROL API
+     EXTERNAL API
   ───────────────────────────────────────────── */
   function startPassiveListening() {
     voiceState = 'PASSIVE';
@@ -644,16 +695,23 @@ const MirrorVoice = (() => {
   function stopListening() { _stopListening(); }
 
   function deactivate() {
-    voiceState = 'PASSIVE';
+    console.log('[Voice] Deactivating — returning to passive.');
     _stopListening();
     if (window.speechSynthesis) window.speechSynthesis.cancel();
-    setTimeout(() => { if (voiceState === 'PASSIVE') startPassiveListening(); }, 500);
+    voiceState = 'PASSIVE';
+    // Give system 600ms to settle before restarting passive
+    setTimeout(() => {
+      if (voiceState === 'PASSIVE') {
+        setStateLabel('Ready');
+        _startListening();
+      }
+    }, 600);
   }
 
   // Preload TTS voices
   if (window.speechSynthesis) {
     window.speechSynthesis.getVoices();
-    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = () => { cachedVoice = null; window.speechSynthesis.getVoices(); };
   }
 
   return {
