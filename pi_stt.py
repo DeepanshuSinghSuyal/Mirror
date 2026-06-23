@@ -67,7 +67,7 @@ async def stt_handler(websocket, model):
         proc = await asyncio.create_subprocess_exec(
             *arecord_cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL
+            stderr=asyncio.subprocess.PIPE
         )
 
         print("[STT] 🎙️  Microphone open! Streaming to browser...")
@@ -104,6 +104,10 @@ async def stt_handler(websocket, model):
         print(f"[STT] Error: {e}")
     finally:
         try:
+            # Check for any arecord error messages
+            err_data = await proc.stderr.read()
+            if err_data:
+                print(f"[STT] arecord error: {err_data.decode().strip()}")
             proc.terminate()
             await proc.wait()
         except Exception:
