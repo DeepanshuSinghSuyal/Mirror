@@ -618,6 +618,8 @@ const MirrorVoice = (() => {
   /* ─────────────────────────────────────────────
      TTS
   ───────────────────────────────────────────── */
+  const ENABLE_AUDIO_WAKE_TONE = true; // Set to false to disable sub-audible tone workaround
+
   const VOICE_PREFS = [
     'Google UK English Female', 'Google US English',
     'Microsoft Zira', 'Microsoft Jenny',
@@ -638,6 +640,40 @@ const MirrorVoice = (() => {
     return cachedVoice;
   }
 
+  function wakeAudioDevice(durationMs = 800) {
+    if (!ENABLE_AUDIO_WAKE_TONE) {
+      return Promise.resolve();
+    }
+    console.log('[TTS] Waking audio device with sub-audible tone...');
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return Promise.resolve();
+      const ctx = new AC();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      // 20Hz is sub-audible (infrasound), and at 0.01 volume it is completely silent
+      osc.frequency.setValueAtTime(20, ctx.currentTime);
+      gain.gain.setValueAtTime(0.01, ctx.currentTime);
+      
+      osc.start();
+      osc.stop(ctx.currentTime + (durationMs / 1000));
+      
+      return new Promise(resolve => {
+        setTimeout(() => {
+          ctx.close().catch(() => {});
+          resolve();
+        }, durationMs);
+      });
+    } catch (e) {
+      console.warn('[TTS] Wake audio device failed:', e);
+      return Promise.resolve();
+    }
+  }
+
   function speak(text, onDone) {
     // Stop any currently playing audio
     if (currentAudio) {
@@ -645,10 +681,14 @@ const MirrorVoice = (() => {
       currentAudio = null;
     }
 
+    // Wake the audio device in parallel with fetching the TTS to avoid extra latency
+    const wakePromise = wakeAudioDevice(800);
+
     // 1. Try Microsoft Edge Neural TTS (natural, high-quality, free) if short enough
     if (text.length < 1000) {
       console.log('[TTS] Requesting premium Edge Neural TTS...');
-      fetch('/api/tts', {
+      
+      const ttsPromise = fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text })
@@ -656,8 +696,10 @@ const MirrorVoice = (() => {
       .then(res => {
         if (!res.ok) throw new Error('TTS server error');
         return res.json();
-      })
-      .then(data => {
+      });
+
+      Promise.all([wakePromise, ttsPromise])
+      .then(([_, data]) => {
         if (!data.audioUrl) throw new Error('No audio URL returned');
         
         // Cache buster guarantees we load the freshly generated audio file
@@ -689,7 +731,9 @@ const MirrorVoice = (() => {
     }
 
     // 2. Otherwise fall back to local offline SpeechSynthesis (robotic, but works offline)
-    speakLocal(text, onDone);
+    wakePromise.then(() => {
+      speakLocal(text, onDone);
+    });
   }
 
   function speakLocal(text, onDone) {
