@@ -126,8 +126,9 @@ const MirrorVoice = (() => {
     }
   }
 
-  // Kick off Vosk connection attempt immediately
-  connectVoskWS();
+  // Disabling Vosk local offline STT to save CPU load on the Pi 4.
+  // Instead, start directly with Google Web Speech API (Native SpeechRecognition).
+  initFallbackStrategy();
 
   function switchToWhisperFallback() {
     if (nativeSRFailed) return; // already switched
