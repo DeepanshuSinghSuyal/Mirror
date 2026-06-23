@@ -148,7 +148,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Static files
-  let filePath = req.url === '/' ? '/index.html' : req.url;
+  const urlObj = new URL(req.url, `http://localhost:${PORT}`);
+  let filePath = urlObj.pathname === '/' ? '/index.html' : urlObj.pathname;
   filePath = path.join(PUBLIC, filePath);
   const ext = path.extname(filePath);
 
