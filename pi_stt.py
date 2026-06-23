@@ -4,7 +4,7 @@ MIRROR Bot — Offline Vosk STT WebSocket Server
 Runs on Raspberry Pi 4. Streams speech recognition to the browser.
 100% offline — no internet needed for STT.
 
-Requirements: pip3 install vosk pyaudio websockets
+Requirements: pip3 install vosk sounddevice websockets --break-system-packages
 Model: download vosk-model-small-en-us-0.15 into ./vosk-model/
 
 Usage: python3 pi_stt.py
@@ -16,13 +16,13 @@ import json
 import sys
 import os
 
-# Check dependencies
 try:
     import vosk
-    import pyaudio
+    import sounddevice as sd
+    import numpy as np
 except ImportError as e:
     print(f"Missing package: {e}")
-    print("Run: pip3 install vosk pyaudio websockets")
+    print("Run: pip3 install vosk sounddevice websockets numpy --break-system-packages")
     sys.exit(1)
 
 # ─── Config ──────────────────────────────────────────────────────────
@@ -52,65 +52,57 @@ async def stt_handler(websocket, model):
     client = websocket.remote_address
     print(f"\n[STT] Browser connected from {client}")
 
-    audio_q  = asyncio.Queue()
-    loop     = asyncio.get_running_loop()
-    rec      = vosk.KaldiRecognizer(model, SAMPLE_RATE)
+    audio_q = asyncio.Queue()
+    loop    = asyncio.get_running_loop()
+    rec     = vosk.KaldiRecognizer(model, SAMPLE_RATE)
 
-    # Open PyAudio mic using callback so it's non-blocking
-    pa = pyaudio.PyAudio()
+    # sounddevice callback — called from audio thread, puts data into async queue
+    def mic_callback(indata, frames, time, status):
+        if status:
+            print(f"[STT] Audio status: {status}")
+        loop.call_soon_threadsafe(audio_q.put_nowait, bytes(indata))
 
-    def mic_callback(in_data, frame_count, time_info, status):
-        loop.call_soon_threadsafe(audio_q.put_nowait, in_data)
-        return (None, pyaudio.paContinue)
-
-    stream = pa.open(
-        format=pyaudio.paInt16,
-        channels=1,
-        rate=SAMPLE_RATE,
-        input=True,
-        frames_per_buffer=CHUNK_SIZE,
-        stream_callback=mic_callback,
-    )
-    stream.start_stream()
-    print("[STT] 🎙️  Microphone open, streaming to browser...")
+    print("[STT] 🎙️  Opening microphone...")
 
     try:
-        # Tell browser STT is ready
-        await websocket.send(json.dumps({"type": "ready", "engine": "vosk"}))
+        with sd.RawInputStream(
+            samplerate=SAMPLE_RATE,
+            blocksize=CHUNK_SIZE,
+            dtype='int16',
+            channels=1,
+            callback=mic_callback
+        ):
+            print("[STT] 🎙️  Microphone open, streaming to browser...")
+            await websocket.send(json.dumps({"type": "ready", "engine": "vosk"}))
 
-        while True:
-            data = await audio_q.get()
+            while True:
+                data = await audio_q.get()
 
-            if rec.AcceptWaveform(data):
-                # Final result
-                result = json.loads(rec.Result())
-                text   = result.get("text", "").strip()
-                if text:
-                    print(f"[STT] ✓ Final  : {text}")
-                    await websocket.send(json.dumps({
-                        "type"  : "transcript",
-                        "text"  : text,
-                        "final" : True
-                    }))
-            else:
-                # Partial result (interim)
-                partial = json.loads(rec.PartialResult())
-                text    = partial.get("partial", "").strip()
-                if text:
-                    await websocket.send(json.dumps({
-                        "type"  : "transcript",
-                        "text"  : text,
-                        "final" : False
-                    }))
+                if rec.AcceptWaveform(data):
+                    result = json.loads(rec.Result())
+                    text   = result.get("text", "").strip()
+                    if text:
+                        print(f"[STT] ✓ {text}")
+                        await websocket.send(json.dumps({
+                            "type" : "transcript",
+                            "text" : text,
+                            "final": True
+                        }))
+                else:
+                    partial = json.loads(rec.PartialResult())
+                    text    = partial.get("partial", "").strip()
+                    if text:
+                        await websocket.send(json.dumps({
+                            "type" : "transcript",
+                            "text" : text,
+                            "final": False
+                        }))
 
     except websockets.exceptions.ConnectionClosed:
-        print(f"[STT] Browser disconnected.")
+        print("[STT] Browser disconnected.")
     except Exception as e:
         print(f"[STT] Error: {e}")
     finally:
-        stream.stop_stream()
-        stream.close()
-        pa.terminate()
         print("[STT] Mic closed.")
 
 
