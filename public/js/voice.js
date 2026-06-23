@@ -149,6 +149,7 @@ const MirrorVoice = (() => {
      CHIMES
   ───────────────────────────────────────────── */
   function playChime(type) {
+    startAudioKeepAlive();
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
@@ -567,6 +568,7 @@ const MirrorVoice = (() => {
      WAKE WORD TRIGGER
   ───────────────────────────────────────────── */
   function triggerWake(query) {
+    startAudioKeepAlive();
     playChime('success');
     // Set IDLE before stopping so onend sees IDLE and does nothing.
     // This prevents the wake word text (e.g. "hey mirror") from being
@@ -626,6 +628,8 @@ const MirrorVoice = (() => {
     'Samantha', 'Karen', 'Daniel', 'Google UK English Male',
   ];
   let cachedVoice = null;
+  let keepAliveCtx = null;
+  let keepAliveOsc = null;
 
   function pickBestVoice() {
     if (cachedVoice) return cachedVoice;
@@ -640,37 +644,35 @@ const MirrorVoice = (() => {
     return cachedVoice;
   }
 
-  function wakeAudioDevice(durationMs = 800) {
-    if (!ENABLE_AUDIO_WAKE_TONE) {
-      return Promise.resolve();
-    }
-    console.log('[TTS] Waking audio device with sub-audible tone...');
+  function startAudioKeepAlive() {
+    if (!ENABLE_AUDIO_WAKE_TONE) return;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return Promise.resolve();
-      const ctx = new AC();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      if (!AC) return;
       
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+      if (!keepAliveCtx || keepAliveCtx.state === 'closed') {
+        keepAliveCtx = new AC();
+        
+        // 20Hz is sub-audible (infrasound), and at 0.001 volume it is completely silent
+        const gain = keepAliveCtx.createGain();
+        gain.gain.setValueAtTime(0.001, keepAliveCtx.currentTime);
+        
+        keepAliveOsc = keepAliveCtx.createOscillator();
+        keepAliveOsc.frequency.setValueAtTime(20, keepAliveCtx.currentTime);
+        
+        keepAliveOsc.connect(gain);
+        gain.connect(keepAliveCtx.destination);
+        keepAliveOsc.start();
+        console.log('[TTS] Continuous audio keep-alive initialized.');
+      }
       
-      // 20Hz is sub-audible (infrasound), and at 0.01 volume it is completely silent
-      osc.frequency.setValueAtTime(20, ctx.currentTime);
-      gain.gain.setValueAtTime(0.01, ctx.currentTime);
-      
-      osc.start();
-      osc.stop(ctx.currentTime + (durationMs / 1000));
-      
-      return new Promise(resolve => {
-        setTimeout(() => {
-          ctx.close().catch(() => {});
-          resolve();
-        }, durationMs);
-      });
+      if (keepAliveCtx && keepAliveCtx.state === 'suspended') {
+        keepAliveCtx.resume().then(() => {
+          console.log('[TTS] Continuous audio keep-alive resumed.');
+        });
+      }
     } catch (e) {
-      console.warn('[TTS] Wake audio device failed:', e);
-      return Promise.resolve();
+      console.warn('[TTS] Failed to start audio keep-alive:', e);
     }
   }
 
@@ -681,14 +683,13 @@ const MirrorVoice = (() => {
       currentAudio = null;
     }
 
-    // Wake the audio device in parallel with fetching the TTS to avoid extra latency
-    const wakePromise = wakeAudioDevice(800);
+    // Ensure continuous wake/keep-alive is active
+    startAudioKeepAlive();
 
     // 1. Try Microsoft Edge Neural TTS (natural, high-quality, free) if short enough
     if (text.length < 1000) {
       console.log('[TTS] Requesting premium Edge Neural TTS...');
-      
-      const ttsPromise = fetch('/api/tts', {
+      fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text })
@@ -696,10 +697,8 @@ const MirrorVoice = (() => {
       .then(res => {
         if (!res.ok) throw new Error('TTS server error');
         return res.json();
-      });
-
-      Promise.all([wakePromise, ttsPromise])
-      .then(([_, data]) => {
+      })
+      .then(data => {
         if (!data.audioUrl) throw new Error('No audio URL returned');
         
         // Cache buster guarantees we load the freshly generated audio file
@@ -731,9 +730,7 @@ const MirrorVoice = (() => {
     }
 
     // 2. Otherwise fall back to local offline SpeechSynthesis (robotic, but works offline)
-    wakePromise.then(() => {
-      speakLocal(text, onDone);
-    });
+    speakLocal(text, onDone);
   }
 
   function speakLocal(text, onDone) {
