@@ -1,8 +1,9 @@
 /* ================================================
    MIRROR Bot — Voice UI Module v3
-   STT: Hybrid — webkitSpeechRecognition (Chrome) OR
-        MediaRecorder + Groq Whisper (Pi/Firefox/any)
-   Auto-fallback: if native SR fails → switches to Whisper
+   STT Priority:
+     1. Vosk WebSocket (Pi local, fully offline) ← best
+     2. Native SpeechRecognition (desktop Chrome)
+     3. MediaRecorder + Groq Whisper (cloud fallback)
    VAD: Web Audio AnalyserNode for smart silence detection
    Wake Word: "Mirror" | States: IDLE/PASSIVE/ACTIVE/PROCESSING/SPEAKING
    ================================================ */
@@ -20,13 +21,112 @@ const MirrorVoice = (() => {
   let voiceState = 'IDLE';
 
   /* ─────────────────────────────────────────────
-     STRATEGY DETECTION
-     Tries native SR first. If it errors with service issues,
-     automatically falls back to MediaRecorder + Groq Whisper.
+     STRATEGY PRIORITY:
+     1. Vosk WebSocket (Pi local, offline) ← best
+     2. Native SpeechRecognition (desktop Chrome)
+     3. MediaRecorder + Groq Whisper (fallback)
   ───────────────────────────────────────────── */
-  // Start assuming native SR is available if API exists
-  let useNativeSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-  let nativeSRFailed = false; // set true after confirmed failure
+  let useVoskWS      = false; // true when ws://localhost:8765 is connected & ready
+  let useNativeSR    = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  let nativeSRFailed = false;
+
+  /* ════════════════════════════════════════════
+     STRATEGY 0 — Vosk WebSocket (Pi offline STT)
+     Connects to pi_stt.py running on localhost:8765.
+     Only attempted when page is served from localhost
+     (i.e. the Pi is running node server.js locally).
+  ════════════════════════════════════════════ */
+  let voskWS          = null;
+  let voskConnected   = false;
+  let voskReconnectId = null;
+
+  function connectVoskWS() {
+    // Only try on localhost — if on Vercel, skip straight to fallback
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      console.log('[Vosk] Not on localhost — using browser STT fallback.');
+      initFallbackStrategy();
+      return;
+    }
+
+    console.log('[Vosk] Trying ws://localhost:8765 ...');
+    try {
+      voskWS = new WebSocket('ws://localhost:8765');
+    } catch (e) {
+      console.log('[Vosk] WebSocket unavailable — using browser STT fallback.');
+      initFallbackStrategy();
+      return;
+    }
+
+    voskWS.onopen = () => {
+      console.log('[Vosk] WebSocket open, waiting for ready signal...');
+    };
+
+    voskWS.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'ready') {
+          voskConnected  = true;
+          useVoskWS      = true;
+          useNativeSR    = false;
+          nativeSRFailed = true; // prevent SR fallback
+          console.log('[Vosk] ✅ Offline STT ready via Vosk!');
+          setStateLabel('Ready');
+          if (voiceState === 'PASSIVE' || voiceState === 'ACTIVE') _startListening();
+          return;
+        }
+
+        if (msg.type === 'transcript' && voskConnected) {
+          handleVoskTranscript(msg.text, msg.final);
+        }
+      } catch (e) {
+        console.warn('[Vosk] Message parse error:', e);
+      }
+    };
+
+    voskWS.onclose = () => {
+      console.warn('[Vosk] Connection closed. Reconnecting in 3s...');
+      voskConnected = false;
+      useVoskWS     = false;
+      voskWS        = null;
+      voskReconnectId = setTimeout(connectVoskWS, 3000);
+    };
+
+    voskWS.onerror = () => {
+      console.log('[Vosk] Not available — falling back to browser STT.');
+      voskConnected = false;
+      useVoskWS     = false;
+      voskWS        = null;
+      initFallbackStrategy();
+    };
+  }
+
+  function initFallbackStrategy() {
+    if (useNativeSR) console.log('[Voice] Strategy: Native SpeechRecognition');
+    else console.log('[Voice] Strategy: MediaRecorder + Groq Whisper');
+    if (voiceState === 'PASSIVE' || voiceState === 'ACTIVE') _startListening();
+  }
+
+  function handleVoskTranscript(text, isFinal) {
+    if (!text) return;
+    console.log(`[Vosk] ${isFinal ? '✓' : '~'} ${text}`);
+
+    if (voiceState === 'PASSIVE') {
+      const lower = text.toLowerCase();
+      if (lower.includes('mirror')) {
+        const idx = lower.indexOf('mirror');
+        let after = text.substring(idx + 6).trim().replace(/^[,\.\s\-\?]+/, '').trim();
+        console.log(`[Vosk] Wake word! Query:"${after}"`);
+        triggerWake(after);
+      }
+    } else if (voiceState === 'ACTIVE') {
+      setStateLabel('\u201C' + text + '\u201D');
+      if (isFinal && text.length > 1) processVoiceQuery(text);
+    }
+  }
+
+  // Kick off Vosk connection attempt immediately
+  connectVoskWS();
 
   function switchToWhisperFallback() {
     if (nativeSRFailed) return; // already switched
@@ -439,8 +539,14 @@ const MirrorVoice = (() => {
      UNIFIED CONTROL
   ════════════════════════════════════════════ */
   function _startListening() {
-    if (useNativeSR) srStart();
-    else {
+    if (useVoskWS) {
+      // Vosk runs continuously — nothing to start, it streams all the time.
+      // Just update the state label so the user knows we're listening.
+      if (voiceState === 'PASSIVE') setStateLabel('Ready');
+      else if (voiceState === 'ACTIVE') { setStateLabel('Listening...'); startWaveform(); }
+    } else if (useNativeSR) {
+      srStart();
+    } else {
       if (voiceState === 'PASSIVE') startPassiveLoop();
       else if (voiceState === 'ACTIVE') startActiveCapture();
     }
@@ -448,6 +554,7 @@ const MirrorVoice = (() => {
 
   function _stopListening() {
     if (restartTimeout) clearTimeout(restartTimeout);
+    // Don't close Vosk WS — it runs continuously. Just stop waveform.
     srStop();
     stopPassiveLoop();
     stopActiveCapture();
