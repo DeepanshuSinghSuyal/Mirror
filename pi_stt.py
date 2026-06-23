@@ -44,15 +44,37 @@ def load_model():
     return vosk.Model(MODEL_PATH)
 
 
+def find_input_device():
+    import subprocess
+    import re
+    try:
+        out = subprocess.check_output(["arecord", "-l"], stderr=subprocess.DEVNULL).decode()
+        for line in out.split("\n"):
+            if "card" in line.lower() and "device" in line.lower():
+                card_match = re.search(r"card\s+(\d+)", line, re.IGNORECASE)
+                dev_match = re.search(r"device\s+(\d+)", line, re.IGNORECASE)
+                if card_match:
+                    card_num = card_match.group(1)
+                    dev_num = dev_match.group(1) if dev_match else "0"
+                    device_name = f"plughw:{card_num},{dev_num}"
+                    print(f"[STT] Auto-detected input device: {device_name}")
+                    return device_name
+    except Exception as e:
+        print(f"[STT] Error auto-detecting input device: {e}")
+    return "default"
+
+
 async def stt_handler(websocket, model):
     """Handle one browser connection — opens mic via arecord, streams recognition."""
     print(f"\n[STT] Browser connected")
 
     rec = vosk.KaldiRecognizer(model, SAMPLE_RATE)
+    device = find_input_device()
 
     # Use arecord — native ALSA tool, works with PipeWire on Pi OS Bookworm
     arecord_cmd = [
         "arecord",
+        "-D", device,
         "-f", "S16_LE",       # 16-bit signed little-endian
         "-r", str(SAMPLE_RATE),# 16000 Hz sample rate
         "-c", "1",             # mono
@@ -61,7 +83,7 @@ async def stt_handler(websocket, model):
         "-"                    # output to stdout
     ]
 
-    print("[STT] 🎙️  Opening microphone via arecord...")
+    print(f"[STT] 🎙️  Opening microphone ({device}) via arecord...")
 
     try:
         proc = await asyncio.create_subprocess_exec(
