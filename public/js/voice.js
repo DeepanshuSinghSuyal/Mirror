@@ -743,8 +743,10 @@ const MirrorVoice = (() => {
     _stopListening();
 
     const lower = query.toLowerCase().trim();
+    const exitPatterns = ['bye', 'goodbye', 'see ya', 'thank you'];
+    const isExit = exitPatterns.some(p => lower.includes(p));
 
-    if (lower.includes('bye mirror') || lower.includes('goodbye mirror') || lower.includes('bye bye mirror')) {
+    if (isExit) {
       console.log('[Voice] Goodbye command triggered');
       playChime('cancel');
       // Small delay so chime plays before deactivating
