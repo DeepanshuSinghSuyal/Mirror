@@ -245,7 +245,7 @@ body.dev-mode {
 .chat-user .chat-label {
   color: rgba(0, 210, 255, 0.8);
   font-family: 'Orbitron', sans-serif;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
   margin-bottom: 4px;
@@ -254,7 +254,7 @@ body.dev-mode {
 .chat-ai .chat-label {
   color: rgba(0, 210, 255, 0.5);
   font-family: 'Orbitron', sans-serif;
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
   margin-bottom: 4px;
@@ -262,7 +262,7 @@ body.dev-mode {
 
 .chat-text {
   font-family: 'Inter', sans-serif;
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 300;
   line-height: 1.6;
   color: rgba(200, 225, 255, 0.85);
