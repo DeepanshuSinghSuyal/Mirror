@@ -645,8 +645,8 @@ const MirrorVoice = (() => {
       currentAudio = null;
     }
 
-    // 1. Try Microsoft Edge Neural TTS (natural, high-quality, free) if online and short enough
-    if (navigator.onLine && text.length < 200) {
+    // 1. Try Microsoft Edge Neural TTS (natural, high-quality, free) if short enough
+    if (text.length < 1000) {
       console.log('[TTS] Requesting premium Edge Neural TTS...');
       fetch('/api/tts', {
         method: 'POST',
