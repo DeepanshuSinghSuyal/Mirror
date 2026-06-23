@@ -19,6 +19,7 @@ const MirrorVoice = (() => {
 
   // State machine: IDLE → PASSIVE → ACTIVE → PROCESSING → SPEAKING → PASSIVE
   let voiceState = 'IDLE';
+  let currentAudio = null;
 
   /* ─────────────────────────────────────────────
      STRATEGY PRIORITY:
@@ -637,10 +638,66 @@ const MirrorVoice = (() => {
   }
 
   function speak(text, onDone) {
+    // Stop any currently playing audio
+    if (currentAudio) {
+      try { currentAudio.pause(); } catch(e) {}
+      currentAudio = null;
+    }
+
+    // 1. Try Microsoft Edge Neural TTS (natural, high-quality, free) if online and short enough
+    if (navigator.onLine && text.length < 200) {
+      console.log('[TTS] Requesting premium Edge Neural TTS...');
+      fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      })
+      .then(res => {
+        if (!res.ok) throw new Error('TTS server error');
+        return res.json();
+      })
+      .then(data => {
+        if (!data.audioUrl) throw new Error('No audio URL returned');
+        
+        // Cache buster guarantees we load the freshly generated audio file
+        const audioUrl = `${data.audioUrl}?t=${Date.now()}`;
+        currentAudio = new Audio(audioUrl);
+        
+        currentAudio.onended = () => {
+          currentAudio = null;
+          if (onDone) onDone();
+        };
+        
+        currentAudio.onerror = (e) => {
+          console.warn('[TTS] Playback error, falling back to offline TTS:', e);
+          currentAudio = null;
+          speakLocal(text, onDone);
+        };
+        
+        currentAudio.play().catch(err => {
+          console.warn('[TTS] Play blocked, falling back to offline TTS:', err);
+          currentAudio = null;
+          speakLocal(text, onDone);
+        });
+      })
+      .catch(err => {
+        console.warn('[TTS] API connection failed, falling back to offline TTS:', err);
+        speakLocal(text, onDone);
+      });
+      return;
+    }
+
+    // 2. Otherwise fall back to local offline SpeechSynthesis (robotic, but works offline)
+    speakLocal(text, onDone);
+  }
+
+  function speakLocal(text, onDone) {
     if (!window.speechSynthesis) { if (onDone) onDone(); return; }
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 0.92; utter.pitch = 1.05; utter.volume = 0.9;
+    utter.rate = 0.92;
+    utter.pitch = 1.05;
+    utter.volume = 0.9;
     const v = pickBestVoice();
     if (v) utter.voice = v;
     utter.onend = () => { if (onDone) onDone(); };
@@ -814,6 +871,10 @@ const MirrorVoice = (() => {
     console.log('[Voice] Deactivating — returning to passive.');
     _stopListening();
     if (window.speechSynthesis) window.speechSynthesis.cancel();
+    if (currentAudio) {
+      try { currentAudio.pause(); } catch(e) {}
+      currentAudio = null;
+    }
     voiceState = 'PASSIVE';
     // Give system 600ms to settle before restarting passive
     setTimeout(() => {

@@ -115,6 +115,38 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // API route: /api/tts
+  if (req.method === 'POST' && req.url === '/api/tts') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { text } = JSON.parse(body);
+        if (!text) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Text is required' }));
+        }
+
+        const { execFile } = require('child_process');
+        const tempFile = path.join(PUBLIC, 'temp_tts.mp3');
+
+        execFile('python3', [path.join(__dirname, 'pi_tts.py'), text, tempFile], (error, stdout, stderr) => {
+          if (error) {
+            console.error('[TTS Error]', error.message, stderr);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: 'Failed to generate TTS audio' }));
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ audioUrl: '/temp_tts.mp3' }));
+        });
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   // Static files
   let filePath = req.url === '/' ? '/index.html' : req.url;
   filePath = path.join(PUBLIC, filePath);
